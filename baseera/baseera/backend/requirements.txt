@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+faster-whisper
+ultralytics
+transformers
+gTTS
+opencv-python-headless
+torch
+langdetect
