@@ -1,8 +1,0 @@
-venv/
-__pycache__/
-*.pyc
-*.mp3
-*.wav
-.streamlit/
-.DS_Store
-*.pt

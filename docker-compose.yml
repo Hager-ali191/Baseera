@@ -1,0 +1,56 @@
+services:
+  backend:
+    build: ./backend
+    container_name: baseera-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Optional — leave blank/unset to run Siara in rule-based fallback mode.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+    volumes:
+      # Cache downloaded model weights between container restarts/rebuilds,
+      # so you don't re-download Whisper/YOLO/the LLM every time.
+      - model-cache:/root/.cache
+      # backend/main.py writes feedback to ../data/feedback_log.jsonl
+      # (relative to backend/, deliberately outside the folder uvicorn's
+      # --reload would watch natively) — inside this container that
+      # resolves to /data. Bind-mount it so submissions actually persist
+      # on the host instead of vanishing when the container is removed.
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  nicegui:
+    build: ./NiceGUI
+    container_name: baseera-nicegui
+    ports:
+      - "8080:8080"
+    environment:
+      # Containers reach each other by service name, not localhost.
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Optional alternate frontend. Off by default; start it explicitly with:
+  #   docker compose --profile streamlit up
+  streamlit:
+    build: ./Streamlit
+    container_name: baseera-streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    profiles:
+      - streamlit
+
+volumes:
+  model-cache:

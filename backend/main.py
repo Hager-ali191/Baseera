@@ -8,13 +8,17 @@ Run with:
 """
 
 import base64
+import json
 import os
 import tempfile
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
+import assistant  # Siara's brain — LLM Q&A about the project/site, no heavy model loading
 import pipeline  # importing this triggers model loading (see pipeline.py)
 
 app = FastAPI(title="Baseera API", version="1.0")
@@ -78,3 +82,73 @@ async def find_object(
 
     result["audio_base64"] = audio_b64
     return result
+
+
+# -----------------------------------------------------------------------------
+# Siara — the in-app guide bot. Separate from the object-finding pipeline
+# above: this endpoint answers questions ABOUT the project/website itself.
+# -----------------------------------------------------------------------------
+class ChatTurn(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class AssistantRequest(BaseModel):
+    message: str
+    history: list[ChatTurn] = []
+
+
+@app.post("/api/assistant")
+def ask_assistant(req: AssistantRequest):
+    """
+    Siara's chat endpoint. Uses Claude (if ANTHROPIC_API_KEY is set on the
+    backend) to answer any question about how Baseera works or where to
+    find something on the site; otherwise falls back to rule-based answers.
+    See assistant.py for details.
+    """
+    if not req.message or not req.message.strip():
+        return JSONResponse({"error": "message must not be empty."}, status_code=400)
+
+    history = [{"role": t.role, "content": t.content} for t in req.history]
+    return assistant.get_assistant_reply(req.message, history=history)
+
+
+# -----------------------------------------------------------------------------
+# Feedback form on the homepage. The frontend already posts here; this was
+# previously missing on the backend, so every submission silently 404'd.
+# Stored as a simple local JSON-lines file — swap for a real database/email
+# integration later if needed, the frontend contract won't need to change.
+# -----------------------------------------------------------------------------
+# Deliberately stored OUTSIDE backend/ (one level up, in a "data/" folder at
+# the project root) — not because it needs to be there, but because
+# uvicorn --reload (if someone re-enables it — see run_backend.sh/.bat)
+# watches backend/ recursively, and a file that changes on every submission
+# would trigger a full model-reloading restart on every piece of feedback.
+FEEDBACK_LOG_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "feedback_log.jsonl")
+os.makedirs(os.path.dirname(FEEDBACK_LOG_PATH), exist_ok=True)
+
+
+class FeedbackRequest(BaseModel):
+    name: str = ""
+    email: str = ""
+    message: str
+
+
+@app.post("/api/feedback")
+def submit_feedback(req: FeedbackRequest):
+    if not req.message or not req.message.strip():
+        return JSONResponse({"error": "message must not be empty."}, status_code=400)
+
+    entry = {
+        "name": req.name.strip(),
+        "email": req.email.strip(),
+        "message": req.message.strip(),
+        "received_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        with open(FEEDBACK_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        return JSONResponse({"error": f"Could not save feedback: {e}"}, status_code=500)
+
+    return {"status": "ok"}

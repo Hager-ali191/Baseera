@@ -8,3 +8,11 @@ gTTS
 opencv-python-headless
 torch
 langdetect
+
+# Siara (the in-app guide bot) — optional but recommended: without a
+# ANTHROPIC_API_KEY set, Siara still works using rule-based fallback answers.
+anthropic
+
+# Testing (see backend/tests/) — not needed to run the app, only to test it.
+pytest
+httpx
