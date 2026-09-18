@@ -1,3 +1,4 @@
+import os
 import re
 
 import cv2
@@ -10,13 +11,57 @@ from transformers import pipeline
 from langdetect import detect as detect_text_language
 
 
+# -----------------------------------------------------------------------------
+# CPU THREAD LIMITING
+# -----------------------------------------------------------------------------
+# By default, PyTorch (and libraries built on it) will grab EVERY CPU core/
+# thread it can find with no cap. On a laptop, that's exactly what makes a
+# request feel like it locks the whole machine and spikes the fans/heat —
+# it's not a bug in any one model, it's the default "use everything"
+# behavior of CPU inference libraries in general.
+#
+# This caps it. Default is half your CPU cores (min 1, max 4), which in
+# practice keeps the laptop usable *while* a request is running, at the
+# cost of that request taking somewhat longer. Override with an environment
+# variable if you want to tune it for your machine:
+#
+#   export BASEERA_CPU_THREADS=2      # a slower/hotter laptop
+#   export BASEERA_CPU_THREADS=8      # a desktop/server with cores to spare
+#
+# This must happen before any model is loaded below — thread pools are
+# initialized once, at import/load time, not per-request.
+_cpu_count = os.cpu_count() or 4
+_DEFAULT_THREADS = max(1, min(4, _cpu_count // 2))
+CPU_THREADS = int(os.getenv("BASEERA_CPU_THREADS", _DEFAULT_THREADS))
+
+torch.set_num_threads(CPU_THREADS)
+cv2.setNumThreads(CPU_THREADS)
+os.environ.setdefault("OMP_NUM_THREADS", str(CPU_THREADS))
+os.environ.setdefault("MKL_NUM_THREADS", str(CPU_THREADS))
+print(
+    f"[Baseera] Capping CPU inference to {CPU_THREADS} thread(s) "
+    f"(of {_cpu_count} available) — set BASEERA_CPU_THREADS to change this."
+)
+
+
 FOCAL_LENGTH = 600  # recalibrate for actual camera
 
 KNOWN_WIDTHS_CM = {
-    "laptop": 35, "cell phone": 7, "person": 50, "chair": 50,
-    "bottle": 7, "cup": 9, "book": 20, "keyboard": 45,
-    "mouse": 12, "tv": 120, "backpack": 30, "handbag": 25,
-    "remote": 5, "umbrella": 100, "couch": 180,
+    "laptop": 35,
+    "cell phone": 7,
+    "person": 50,
+    "chair": 50,
+    "bottle": 7,
+    "cup": 9,
+    "book": 20,
+    "keyboard": 45,
+    "mouse": 12,
+    "tv": 120,
+    "backpack": 30,
+    "handbag": 25,
+    "remote": 5,
+    "umbrella": 100,
+    "couch": 180,
     "default": 30,
 }
 
@@ -27,17 +72,32 @@ SUPPORTED_LANGUAGES = {
 DEFAULT_LANGUAGE = "en"
 
 OBJECT_NAME_AR = {
-    "laptop": "الحاسوب المحمول", "cell phone": "الهاتف", "person": "شخص",
-    "chair": "الكرسي", "bottle": "الزجاجة", "cup": "الكوب", "book": "الكتاب",
-    "keyboard": "لوحة المفاتيح", "mouse": "الفأرة", "tv": "التلفاز",
-    "backpack": "حقيبة الظهر", "handbag": "الحقيبة", "remote": "جهاز التحكم",
-    "umbrella": "المظلة", "couch": "الأريكة",
+    "laptop": "الحاسوب المحمول",
+    "cell phone": "الهاتف",
+    "person": "شخص",
+    "chair": "الكرسي",
+    "bottle": "الزجاجة",
+    "cup": "الكوب",
+    "book": "الكتاب",
+    "keyboard": "لوحة المفاتيح",
+    "mouse": "الفأرة",
+    "tv": "التلفاز",
+    "backpack": "حقيبة الظهر",
+    "handbag": "الحقيبة",
+    "remote": "جهاز التحكم",
+    "umbrella": "المظلة",
+    "couch": "الأريكة",
 }
 DIRECTION_AR = {
-    "left": "اليسار", "right": "اليمين", "center": "الأمام مباشرة",
-    "top": "الأعلى", "bottom": "الأسفل",
-    "top-left": "أعلى اليسار", "top-right": "أعلى اليمين",
-    "bottom-left": "أسفل اليسار", "bottom-right": "أسفل اليمين",
+    "left": "اليسار",
+    "right": "اليمين",
+    "center": "الأمام مباشرة",
+    "top": "الأعلى",
+    "bottom": "الأسفل",
+    "top-left": "أعلى اليسار",
+    "top-right": "أعلى اليمين",
+    "bottom-left": "أسفل اليسار",
+    "bottom-right": "أسفل اليمين",
 }
 
 DETECTION_MODEL_NAMES = {
@@ -49,22 +109,38 @@ _ARABIC_CHAR_RE = re.compile(r"[\u0600-\u06FF]")
 
 
 print("[Baseera] Loading Whisper (speech-to-text)...")
-whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+WHISPER_MODEL_SIZE = os.getenv("BASEERA_WHISPER_MODEL", "base")
+whisper_model = WhisperModel(
+    WHISPER_MODEL_SIZE, device="cpu", compute_type="int8", cpu_threads=CPU_THREADS
+)
 
 print("[Baseera] Loading YOLO detection models...")
 detection_models = {name: YOLO(path) for name, path in DETECTION_MODEL_NAMES.items()}
 
-print("[Baseera] Loading local instruct LLM (Qwen2.5-1.5B-Instruct)...")
+# Default changed from Qwen2.5-1.5B-Instruct to Qwen2.5-0.5B-Instruct (~3x
+# fewer parameters, ~3x less RAM) after a real MemoryError crash during
+# weight loading on a RAM-constrained machine. `low_cpu_mem_usage=True`
+# (requires the `accelerate` package — see requirements.txt) also matters
+# here on its own: without it, transformers builds the model with random
+# weights AND loads the checkpoint into a second buffer before copying over,
+# roughly doubling peak RAM during loading specifically — which lines up
+# with the crash happening mid-load (58% through weight loading), not
+# during actual inference afterward.
+#
+# Override the model if you have RAM to spare and want better answers:
+#   export BASEERA_LLM_MODEL=Qwen/Qwen2.5-1.5B-Instruct
+LLM_MODEL_NAME = os.getenv("BASEERA_LLM_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+print(f"[Baseera] Loading local instruct LLM ({LLM_MODEL_NAME})...")
 device_id = 0 if torch.cuda.is_available() else -1
 llm_pipeline = pipeline(
     "text-generation",
-    model="Qwen/Qwen2.5-1.5B-Instruct",
+    model=LLM_MODEL_NAME,
     dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
     device=device_id,
+    model_kwargs={"low_cpu_mem_usage": True},
 )
 
 print("[Baseera] All models loaded:", list(detection_models.keys()))
-
 
 
 def load_image_from_bytes(image_bytes: bytes):
@@ -88,34 +164,43 @@ def guess_text_language(text: str) -> str:
 def extract_object_local(query_text: str) -> str:
     """Returns a single lowercase English object name extracted from the query."""
     messages = [
-        {"role": "system", "content": (
-            "You are an information extraction system. The user is asking about a missing object, "
-            "in English or Arabic. Identify the object and return ONLY its name as a single lowercase "
-            "English word or short phrase from common object vocabulary (e.g. laptop, cell phone, "
-            "backpack, bottle, cup, book, chair, tv, remote, keyboard, mouse, umbrella, couch). "
-            "Return only the object name in English, nothing else -- no translation notes, no punctuation."
-        )},
+        {
+            "role": "system",
+            "content": (
+                "You are an information extraction system. The user is asking about a missing object, "
+                "in English or Arabic. Identify the object and return ONLY its name as a single lowercase "
+                "English word or short phrase from common object vocabulary (e.g. laptop, cell phone, "
+                "backpack, bottle, cup, book, chair, tv, remote, keyboard, mouse, umbrella, couch). "
+                "Return only the object name in English, nothing else -- no translation notes, no punctuation."
+            ),
+        },
         {"role": "user", "content": query_text},
     ]
-    
+
     outputs = llm_pipeline(
-        messages, 
-        max_new_tokens=10,
-        do_sample=False,
-        clean_up_tokenization_spaces=False
+        messages, max_new_tokens=10, do_sample=False, clean_up_tokenization_spaces=False
     )
-    
+
     result = outputs[0]["generated_text"][-1]["content"].strip().lower()
     return re.sub(r"[^a-z0-9 ]", "", result)
 
 
-
-
-
 def _box_direction(cx, cy, frame_w, frame_h):
     frame_cx, frame_cy = frame_w // 2, frame_h // 2
-    h_dir = "left" if cx < frame_cx - (frame_w * 0.2) else "right" if cx > frame_cx + (frame_w * 0.2) else "center"
-    v_dir = "top" if cy < frame_cy - (frame_h * 0.2) else "bottom" if cy > frame_cy + (frame_h * 0.2) else "middle"
+    h_dir = (
+        "left"
+        if cx < frame_cx - (frame_w * 0.2)
+        else "right"
+        if cx > frame_cx + (frame_w * 0.2)
+        else "center"
+    )
+    v_dir = (
+        "top"
+        if cy < frame_cy - (frame_h * 0.2)
+        else "bottom"
+        if cy > frame_cy + (frame_h * 0.2)
+        else "middle"
+    )
     if h_dir != "center" and v_dir != "middle":
         return f"{v_dir}-{h_dir}"
     return h_dir if v_dir == "middle" else v_dir
@@ -141,21 +226,18 @@ def analyze_detections_multi_model(frame, target_object: str, conf: float = 0.3)
             real_w_cm = KNOWN_WIDTHS_CM.get(class_name, KNOWN_WIDTHS_CM["default"])
             dist_cm = (real_w_cm * FOCAL_LENGTH) / pixel_width if pixel_width > 0 else 0
 
-            all_matches.append({
-                "object": class_name,
-                "direction": _box_direction(cx, cy, w, h),
-                "distance_m": round(dist_cm / 100, 2),
-                "confidence": round(confidence, 2),
-                "model": model_name,
-            })
+            all_matches.append(
+                {
+                    "object": class_name,
+                    "direction": _box_direction(cx, cy, w, h),
+                    "distance_m": round(dist_cm / 100, 2),
+                    "confidence": round(confidence, 2),
+                    "model": model_name,
+                }
+            )
 
     all_matches.sort(key=lambda m: m["confidence"], reverse=True)
     return all_matches
-
-
-
-
-
 
 
 def _contains_arabic(text: str) -> bool:
@@ -167,33 +249,44 @@ def _template_response(target_object, best_match, language):
     if language == "ar":
         object_ar = OBJECT_NAME_AR.get(target_object, target_object)
         if best_match:
-            direction_ar = DIRECTION_AR.get(best_match["direction"], best_match["direction"])
-            return (f"نعم، وجدت {object_ar}. إنه في جهة {direction_ar}، "
-                    f"على بعد حوالي {best_match['distance_m']} متر.")
+            direction_ar = DIRECTION_AR.get(
+                best_match["direction"], best_match["direction"]
+            )
+            return (
+                f"نعم، وجدت {object_ar}. إنه في جهة {direction_ar}، "
+                f"على بعد حوالي {best_match['distance_m']} متر."
+            )
         return f"بحثت حولي، لكن لم أتمكن من العثور على {object_ar} في مجال الرؤية."
 
     if best_match:
-        return (f"Yes, I found your {target_object}. It is located to the {best_match['direction']}, "
-                f"about {best_match['distance_m']} meters away.")
+        return (
+            f"Yes, I found your {target_object}. It is located to the {best_match['direction']}, "
+            f"about {best_match['distance_m']} meters away."
+        )
     return f"I looked around, but I could not find your {target_object} in the camera view."
 
 
 def generate_voice_response(target_object, matches, language=DEFAULT_LANGUAGE):
     best_match = matches[0] if matches else None
-    language_name = SUPPORTED_LANGUAGES.get(language, SUPPORTED_LANGUAGES[DEFAULT_LANGUAGE])["name"]
+    language_name = SUPPORTED_LANGUAGES.get(
+        language, SUPPORTED_LANGUAGES[DEFAULT_LANGUAGE]
+    )["name"]
 
-    facts = (
-        f"Object: {target_object}. "
-        + (f"Found: yes. Direction: {best_match['direction']}. Distance: {best_match['distance_m']} meters."
-           if best_match else "Found: no.")
+    facts = f"Object: {target_object}. " + (
+        f"Found: yes. Direction: {best_match['direction']}. Distance: {best_match['distance_m']} meters."
+        if best_match
+        else "Found: no."
     )
 
     messages = [
-        {"role": "system", "content": (
-            f"You are a voice assistant for a blind user. Given the facts below, write ONE short, "
-            f"natural spoken sentence in {language_name} describing whether the object was found and, "
-            f"if so, where. Respond ONLY in {language_name}, nothing else."
-        )},
+        {
+            "role": "system",
+            "content": (
+                f"You are a voice assistant for a blind user. Given the facts below, write ONE short, "
+                f"natural spoken sentence in {language_name} describing whether the object was found and, "
+                f"if so, where. Respond ONLY in {language_name}, nothing else."
+            ),
+        },
         {"role": "user", "content": facts},
     ]
     outputs = llm_pipeline(messages, max_new_tokens=60)
@@ -206,15 +299,21 @@ def generate_voice_response(target_object, matches, language=DEFAULT_LANGUAGE):
     return generated
 
 
-def speak(text: str, language: str = DEFAULT_LANGUAGE, filename: str = "response.mp3") -> str:
+def speak(
+    text: str, language: str = DEFAULT_LANGUAGE, filename: str = "response.mp3"
+) -> str:
     """Synthesizes speech and saves it to `filename`. Returns the path."""
-    gtts_code = SUPPORTED_LANGUAGES.get(language, SUPPORTED_LANGUAGES[DEFAULT_LANGUAGE])["gtts_code"]
+    gtts_code = SUPPORTED_LANGUAGES.get(
+        language, SUPPORTED_LANGUAGES[DEFAULT_LANGUAGE]
+    )["gtts_code"]
     tts = gTTS(text=text, lang=gtts_code)
     tts.save(filename)
     return filename
 
 
-def run_full_pipeline(frame, audio_bytes: bytes | None, query_text: str | None, conf: float = 0.3) -> dict:
+def run_full_pipeline(
+    frame, audio_bytes: bytes | None, query_text: str | None, conf: float = 0.3
+) -> dict:
     """
     One call = the whole notebook flow, minus Colab-specific capture.
     Give it EITHER audio_bytes OR query_text, plus an already-decoded frame.
@@ -229,7 +328,11 @@ def run_full_pipeline(frame, audio_bytes: bytes | None, query_text: str | None, 
         try:
             segments, info = whisper_model.transcribe(tmp_path)
             query_text = "".join(segment.text for segment in segments).strip()
-            language = info.language if info.language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+            language = (
+                info.language
+                if info.language in SUPPORTED_LANGUAGES
+                else DEFAULT_LANGUAGE
+            )
         finally:
             os.remove(tmp_path)
     elif query_text is not None:

@@ -4,6 +4,7 @@ python-multipart
 faster-whisper
 ultralytics
 transformers
+accelerate
 gTTS
 opencv-python-headless
 torch

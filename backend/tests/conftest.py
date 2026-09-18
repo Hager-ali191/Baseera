@@ -45,6 +45,7 @@ def _install_stub_modules():
                 return False
 
         torch_stub.cuda = _Cuda()
+        torch_stub.set_num_threads = lambda n: None
         sys.modules["torch"] = torch_stub
 
     # ---- ultralytics (YOLO) --------------------------------------------

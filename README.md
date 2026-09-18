@@ -280,7 +280,7 @@ straight to §9, no local Python setup needed there).
 2. Create **one shared virtual environment**:
 
    ```bash
-   python -m venv venv
+   python -m venv venvv
    ```
 
    Activate it — Windows: `venv\Scripts\activate` · macOS/Linux: `source venv/bin/activate`
@@ -424,6 +424,7 @@ are browser JavaScript and need to be checked by hand in an actual browser
 
 | Symptom | Likely cause / fix |
 |---|---|
+| Laptop gets very hot / fans spike / machine feels unresponsive while a request runs | This is the normal behavior of CPU inference libraries (PyTorch, Whisper) with no thread cap — by default they grab **every** CPU core/thread at once, which is exactly what makes a modest laptop feel like it's locked up. Set `BASEERA_CPU_THREADS` (in `backend/.env`, or the root `.env` if using Docker) to a lower number, e.g. `2`, and restart the backend — it'll be slower per request but the machine stays usable. `backend/pipeline.py` already defaults to half your CPU cores (min 1, max 4) even without setting anything, so this was already somewhat capped; lower it further if that's still too much for your hardware. This caps the AI models specifically — it doesn't change anything else about how the project runs. |
 | "Backend not reachable" / connection failed | The FastAPI terminal isn't running, crashed while loading models, or `BACKEND_URL` doesn't match where it's actually running (default `http://127.0.0.1:8000`). |
 | First request takes minutes | Normal on first run — model weights are downloading. Subsequent requests are much faster. |
 | Mic button does nothing / recording never starts | The browser needs microphone permission — check the address bar for a blocked-permission icon. Recording requires a *secure context*: `localhost` is fine, but a plain `http://` address on another machine is not (use HTTPS or an SSH tunnel). |

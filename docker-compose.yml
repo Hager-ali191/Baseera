@@ -8,6 +8,10 @@ services:
       # Optional — leave blank/unset to run Siara in rule-based fallback mode.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      # Optional — caps CPU threads used by the AI models. Lower this (e.g. 2)
+      # if the host machine overheats or becomes unresponsive during a
+      # request. Defaults to half the container's visible CPU cores if unset.
+      - BASEERA_CPU_THREADS=${BASEERA_CPU_THREADS:-}
     volumes:
       # Cache downloaded model weights between container restarts/rebuilds,
       # so you don't re-download Whisper/YOLO/the LLM every time.

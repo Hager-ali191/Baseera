@@ -77,6 +77,13 @@ def install_media_js():
             canvas.getContext('2d').drawImage(video, 0, 0);
             return canvas.toDataURL('image/jpeg', 0.9);
         }
+        function baseeraStopWebcam() {
+            const video = document.getElementById('webcam-feed');
+            if (video && video.srcObject) {
+                video.srcObject.getTracks().forEach(t => t.stop());
+                video.srcObject = null;
+            }
+        }
         </script>
     """)
 
