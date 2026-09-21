@@ -233,6 +233,9 @@ def analyze_detections_multi_model(frame, target_object: str, conf: float = 0.3)
                     "distance_m": round(dist_cm / 100, 2),
                     "confidence": round(confidence, 2),
                     "model": model_name,
+                    # Pixel coordinates in the decoded frame; used by the
+                    # Live Demo history to draw the box on the photo.
+                    "bbox": [x1, y1, x2, y2],
                 }
             )
 

@@ -52,7 +52,9 @@ than search.
 
 **What it deliberately doesn't do:** store your voice or photos anywhere.
 Every request is processed in memory and discarded once the response is
-sent back.
+sent back. The Live Demo's run history (see §5) follows the same rule: it is
+held in the browser tab's memory only, never written to disk, and disappears
+when the page is reloaded.
 
 ## 2. How It Works, In Plain Terms
 
@@ -97,6 +99,7 @@ Baseera/
 │   ├── guide_bot.py                 # Siara: floating chat + voice widget, used on every page
 │   ├── feedback.py                   # Feedback form component (posts to /api/feedback)
 │   ├── recording.py                   # Real mic recording + webcam capture (browser JS + glue)
+│   ├── history.py                      # Live Demo run history: annotated photo + detection details per run
 │   ├── pages/
 │   │   ├── home.py                      # "/"      — hero, architecture, team, feedback
 │   │   ├── about.py                      # "/about" — mission, audience, FAQ
@@ -171,12 +174,16 @@ Response:
   "language": "en",
   "target_object": "laptop",
   "matches": [
-    {"object": "laptop", "direction": "left", "distance_m": 1.2, "confidence": 0.91, "model": "yolov8n"}
+    {"object": "laptop", "direction": "left", "distance_m": 1.2, "confidence": 0.91, "model": "yolov8n", "bbox": [112, 240, 688, 655]}
   ],
   "reply_text": "Yes, I found your laptop. It is located to the left, about 1.2 meters away.",
   "audio_base64": "<mp3 bytes, base64-encoded>"
 }
 ```
+
+Each match's `bbox` is `[x1, y1, x2, y2]` in pixels of the uploaded photo
+(top-left and bottom-right corners of the detected box). The Live Demo's run
+history uses it to draw the box on the photo.
 
 **`POST /api/assistant`** — JSON:
 
@@ -214,6 +221,15 @@ common header, styles, shared state, and the Siara widget:
     `POST /api/find` and shows the transcribed question, the spoken answer
     (auto-playing audio), and direction/distance/confidence for every
     match — read directly from the backend's real response shape.
+  - *3. Run History* (`history.py`): every run in the current session is
+    listed below the results, newest first (last 20 kept). Each entry is
+    expandable and shows the photo with a **labelled bounding box on every
+    detected match**, the transcribed question, language, target class,
+    response time, the assistant's reply (with audio replay), and a table
+    of confidence / direction / distance / model / box coordinates. Runs
+    where the target class wasn't detected are recorded too. The history
+    lives in that browser tab's memory only — nothing is saved to disk — so
+    it clears on page reload, or with the "Clear history" button.
 - **Siara** floats in the bottom-left corner on **every** page — one shared
   component (`guide_bot.py`), not copy-pasted per page.
 - The **header** is also shared (`layout.py`) and now stays visible on
@@ -438,6 +454,8 @@ are browser JavaScript and need to be checked by hand in an actual browser
 | Feedback form on the homepage silently does nothing | Fixed — it was posting to `/api/feedback`, which didn't exist on the backend. The backend now has that route (see §4) and logs submissions to `data/feedback_log.jsonl` at the project root. |
 | Recording button said "captured successfully" but the backend never got any audio | Fixed — the previous JS called `emit_event('save_audio', ...)` to hand the recording to Python, but NiceGUI's real browser-side function is `emitEvent` (camelCase). The typo threw a silent `ReferenceError` in the browser console; the Python-side handler never fired, yet the on-screen "success" text was set unconditionally, so it looked like it worked. `NiceGUI/recording.py` replaces this with a Promise-based `ui.run_javascript()` call that returns the recorded audio directly — there's no separate event name to get wrong, and the UI only reports success after the data has actually arrived. |
 | "Failed to connect to backend server" on Live Demo, even though the backend terminal shows it fully started | This used to lump two very different situations together — it's now split into two, and both were real bugs found while debugging this project, not hypotheticals: <br>**(a) It's actually just slow, not disconnected.** Check the backend terminal for `[transformers]` generation warnings right after you clicked the button — if they're there, the request *did* arrive and the backend was still processing when the frontend gave up waiting. On CPU-only hardware, Whisper + two YOLO models + the local LLM (called twice) + gTTS in one request can take well over a minute. `NiceGUI/pages/demo.py` now waits up to 3 minutes and reports this as a timeout, separately from a real connection failure. <br>**(b) The backend actually went down mid-session.** This shows as `httpx.ConnectError: All connection attempts failed`. Cause: `uvicorn --reload` watches the entire `backend/` folder, but the backend also *writes* files into that same folder while running — the downloaded YOLO weights (`yolov8n.pt`, `yolov8s.pt`) and, previously, `feedback_log.jsonl`. Each write triggers `--reload` to kill and fully restart the server (reloading every model, ~1 minute), and every request during that window fails to connect. Fixed two ways: `run_backend.sh`/`.bat` no longer pass `--reload` by default (this backend is too heavy to usefully auto-reload — restart it manually after code changes, or see the comment in those scripts for a `--reload-exclude` alternative), and the feedback log now writes to `data/feedback_log.jsonl` at the project root instead of inside `backend/`, so it can't trigger this even if `--reload` is re-enabled later. |
+| Run history shows the photo but no bounding box | The backend is still running the old `pipeline.py`. Matches now carry a `bbox` field (see §4); restart the backend (or `docker compose up --build`) so it's picked up. Runs recorded before the restart stay without boxes. |
+| Run history is empty after reloading the page | By design — history is kept in the browser tab's memory only, so photos and audio are never stored (see §1). |
 | Header (logo/nav) never appears on the About or Live Demo pages | Fixed — the header used to fade in only after scrolling past a threshold tuned for the long Home page (`window.innerHeight * 0.45`), so shorter pages could be scrolled through entirely without ever crossing it. `NiceGUI/layout.py` now renders the header as always-visible on every page except Home, which keeps the original fade-in effect since it actually makes sense there. |
 
 ## 12. Notes for Contributors
@@ -459,6 +477,10 @@ are browser JavaScript and need to be checked by hand in an actual browser
   pushed as two separate services and pointed at each other via
   `BACKEND_URL` — this is exactly what `docker-compose.yml` already does
   between containers (see §9).
+- The Live Demo history needs `pillow` (listed in `NiceGUI/requirements.txt`)
+  to draw the boxes. It relies on each match's `bbox` from `/api/find`, so
+  if you change the match shape in `pipeline.py`, update `NiceGUI/history.py`
+  too.
 - New NiceGUI page: add `pages/your_page.py` with its own
   `@ui.page("/your-path")` function that calls `render_global_styles()`,
   `render_sticky_header(page="...")`, and `init_guide_bot()` at the top

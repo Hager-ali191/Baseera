@@ -1,10 +1,12 @@
 import base64
+import time
 
 import httpx
 from nicegui import ui
 
 from config import BACKEND_URL
 from guide_bot import init_guide_bot
+from history import add_entry, history_panel
 from layout import render_sticky_header
 from recording import decode_data_url, install_media_js
 from state import state
@@ -228,7 +230,12 @@ def demo_page():
                 progress_row.style("display: flex;")
                 progress_timer.active = True
 
-                files = {"image": (state.image_filename, state.image_bytes, "image/jpeg")}
+                # Snapshot the photo being sent, so the history shows exactly this
+                # image even if the user retakes/uploads another while waiting.
+                sent_image_bytes = state.image_bytes
+                started_at = time.perf_counter()
+
+                files = {"image": (state.image_filename, sent_image_bytes, "image/jpeg")}
                 data_fields = {}
                 if state.audio_bytes:
                     files["audio"] = (state.audio_filename, state.audio_bytes, "audio/webm")
@@ -258,6 +265,13 @@ def demo_page():
                         state.direction = best_match["direction"] if best_match else ""
                         state.distance = f"{best_match['distance_m']} m" if best_match else ""
                         state.confidence = best_match["confidence"] if best_match else 0.0
+
+                        add_entry(
+                            image_bytes=sent_image_bytes,
+                            response=data,
+                            elapsed_s=time.perf_counter() - started_at,
+                        )
+                        history_panel.refresh()
 
                         with result_container:
                             with ui.card().classes(
@@ -326,3 +340,12 @@ def demo_page():
             run_btn = ui.button("SEE DASHBOARD RESULTS", icon="dashboard", on_click=run_pipeline).classes(
                 "px-10 py-4 text-xl font-black rounded-2xl shadow-2xl pulse-glow transition-transform hover:scale-105 cursor-pointer"
             ).style("background-color: #1D2A78; color: #FAD02C;")
+
+        # -------------------------------------------------------------------
+        # 4. RUN HISTORY — every run this session, with the annotated photo
+        #    and the full detection details.
+        # -------------------------------------------------------------------
+        with ui.card().classes(
+            "w-full p-6 shadow-md rounded-xl bg-white-card border border-slate-200 gap-3"
+        ):
+            history_panel()
