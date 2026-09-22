@@ -24,7 +24,7 @@
 - [10. Testing](#testing)
 - [11. Troubleshooting](#troubleshooting)
 - [12. Notes for Contributors](#notes-for-contributors)
-- [13. Meet The Team](#👥-meet-the-team)
+- [13. Meet The Team](#meet-the-team)
 
 ---
 
