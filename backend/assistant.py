@@ -5,32 +5,43 @@ This module powers the in-app assistant ("Siara") that can answer questions
 about the Baseera *project* and *website* itself (not the object-finding
 pipeline's user-facing queries — that's `pipeline.py`).
 
-Two modes, chosen automatically:
+Three modes, tried in order automatically:
 
-1. LLM mode (preferred) — if ANTHROPIC_API_KEY is set, every question is sent
-   to Claude along with a system prompt describing the whole project (what it
-   is, how it's built, every page and what's on it, common troubleshooting).
-   This means Siara can answer *any* phrasing of *any* question about the
-   project, not just a fixed set of keywords, and can help someone who says
-   "I can't find X" by pointing at the right page/button.
+1. Groq (preferred, free) — if GROQ_API_KEY is set, every question is sent to
+   a fast Llama model on Groq's free API (no credit card required; see
+   https://console.groq.com/keys to get a key) along with a system prompt
+   describing the whole project. Called with the standard library only
+   (urllib), so it needs no extra package. This means Siara can answer *any*
+   phrasing of *any* question about the project, not just a fixed set of
+   keywords, and can help someone who says "I can't find X" by pointing at
+   the right page/button.
 
-2. Fallback mode — if no API key is configured (or the API call fails for
-   any reason, e.g. no internet), Siara falls back to the same rule-based
-   keyword matching the project shipped with originally, so the guide bot
-   never goes completely silent.
+2. Anthropic (optional, paid) — if ANTHROPIC_API_KEY is set instead (or
+   Groq's call fails), the same system prompt is sent to Claude via the
+   `anthropic` package. Kept for anyone who already has a key configured;
+   not required.
 
-Set the key as an environment variable before starting the backend:
+3. Fallback mode — if no key is configured, or every API call fails (e.g. no
+   internet), Siara falls back to the same rule-based keyword matching the
+   project shipped with originally, so the guide bot never goes completely
+   silent.
 
-    export ANTHROPIC_API_KEY=sk-ant-...          # macOS/Linux
-    setx ANTHROPIC_API_KEY "sk-ant-..."           # Windows
+Set a key as an environment variable before starting the backend:
 
-Optionally override the model with ANTHROPIC_MODEL (defaults to a small,
-fast, cheap model since this is a lightweight Q&A bot, not the main pipeline).
+    export GROQ_API_KEY=gsk_...                   # macOS/Linux, free tier
+    setx GROQ_API_KEY "gsk_..."                    # Windows
+
+Optionally override the model with GROQ_MODEL (defaults to a small, fast
+model since this is a lightweight Q&A bot, not the main pipeline) or
+ANTHROPIC_MODEL for the Anthropic path.
 """
 
+import json
 import os
+import urllib.request
 from typing import List, Optional, TypedDict
 
+DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 DEFAULT_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
 # -----------------------------------------------------------------------------
@@ -184,38 +195,81 @@ class ChatTurn(TypedDict):
     content: str
 
 
+def _groq_reply(message: str, history: List[ChatTurn]) -> Optional[str]:
+    """Calls Groq's free, OpenAI-compatible chat endpoint using only the
+    standard library (no `groq` or `openai` package needed). Returns None
+    on any failure so the caller can fall through to the next option."""
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return None
+
+    messages = [{"role": "system", "content": PROJECT_KNOWLEDGE}]
+    messages += [{"role": t["role"], "content": t["content"]} for t in history]
+    messages.append({"role": "user", "content": message})
+
+    body = json.dumps(
+        {"model": DEFAULT_GROQ_MODEL, "messages": messages, "max_tokens": 400}
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.groq.com/openai/v1/chat/completions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        text = data["choices"][0]["message"]["content"].strip()
+        return text or None
+    except Exception:
+        # Bad/missing key, rate limit, no internet, model renamed, etc.
+        # Any of these should fall through, not crash the widget.
+        return None
+
+
+def _anthropic_reply(message: str, history: List[ChatTurn]) -> Optional[str]:
+    """Calls Claude via the `anthropic` package, if ANTHROPIC_API_KEY is set."""
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+        messages = [{"role": t["role"], "content": t["content"]} for t in history]
+        messages.append({"role": "user", "content": message})
+
+        response = client.messages.create(
+            model=DEFAULT_MODEL,
+            max_tokens=400,
+            system=PROJECT_KNOWLEDGE,
+            messages=messages,
+        )
+        text = "".join(
+            block.text for block in response.content if getattr(block, "type", None) == "text"
+        ).strip()
+        return text or None
+    except Exception:
+        return None
+
+
 def get_assistant_reply(message: str, history: Optional[List[ChatTurn]] = None) -> dict:
     """
     Returns {"reply": str, "source": "llm" | "fallback"}.
 
-    Tries the real LLM first (if configured); falls back to rule-based
-    answers on any failure so the widget always responds to something.
+    Tries Groq's free API first (if GROQ_API_KEY is set), then Anthropic (if
+    ANTHROPIC_API_KEY is set instead), then falls back to rule-based answers
+    on any failure so the widget always responds to something.
     """
     history = history or []
-    api_key = os.getenv("ANTHROPIC_API_KEY")
 
-    if api_key:
-        try:
-            import anthropic
-
-            client = anthropic.Anthropic(api_key=api_key)
-            messages = [{"role": t["role"], "content": t["content"]} for t in history]
-            messages.append({"role": "user", "content": message})
-
-            response = client.messages.create(
-                model=DEFAULT_MODEL,
-                max_tokens=400,
-                system=PROJECT_KNOWLEDGE,
-                messages=messages,
-            )
-            text = "".join(
-                block.text for block in response.content if getattr(block, "type", None) == "text"
-            ).strip()
-            if text:
-                return {"reply": text, "source": "llm"}
-        except Exception:
-            # Any failure (missing package, bad key, network, rate limit...)
-            # falls straight through to the offline fallback below.
-            pass
+    for call in (_groq_reply, _anthropic_reply):
+        text = call(message, history)
+        if text:
+            return {"reply": text, "source": "llm"}
 
     return {"reply": _fallback_reply(message), "source": "fallback"}
