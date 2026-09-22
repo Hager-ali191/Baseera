@@ -490,3 +490,17 @@ are browser JavaScript and need to be checked by hand in an actual browser
   --build` rebuilds only the images whose `Dockerfile`/context changed.
   Model weights persist across rebuilds via the `model-cache` volume, so a
   rebuild doesn't mean re-downloading them.
+
+
+---
+
+## 👥 Meet the Team
+
+| Team Member | AI Focus Area | Deployment Focus Area | Contact |
+| :--- | :--- | :--- | :--- |
+| **Hager Ali** | Vision & Detection | Frontend (Streamlit & NiceGUI) | [![GitHub](https://img.shields.io/badge/GitHub-100000?style=flat&logo=github&logoColor=white)](https://github.com/Hager-ali191) [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/hager-ali-mohammed) |
+| **Mariam Hazzaa** | Speech & Language | Backend API | [![GitHub](https://img.shields.io/badge/GitHub-100000?style=flat&logo=github&logoColor=white)](https://github.com/mariamhazzaa) [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/mariam-hazzaa-2ab364389?utm_source=share_via&utm_content=profile&utm_medium=member_ios) |
+| **Mariam Mohey** | Response & Voice | Containerization | [![GitHub](https://img.shields.io/badge/GitHub-100000?style=flat&logo=github&logoColor=white)](https://github.com/MariamArafa-0) [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/mariam-arafa0) |
+| **Menna Sobhe** | Orchestration & Testing | Cloud & Mobile Access | [![GitHub](https://img.shields.io/badge/GitHub-100000?style=flat&logo=github&logoColor=white)](https://github.com/monyy77) [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/menna-sobhe-03a2231ba) |
+
+---
