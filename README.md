@@ -495,7 +495,7 @@ are browser JavaScript and need to be checked by hand in an actual browser
 
 ---
 
-## 👥 Meet the Team
+## Meet the Team
 
 | Team Member | AI Focus Area | Deployment Focus Area | Contact |
 | :--- | :--- | :--- | :--- |
