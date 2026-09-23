@@ -7,7 +7,7 @@ Importing a page module registers its @ui.page(...) route as a side effect
 """
 
 from nicegui import ui
-
+import os
 from pages import about, demo, home  # noqa: F401  (side effect: registers routes)
 
 # ui.run(title="Baseera - Vision & Voice Assistant", port=8080, reload=False)

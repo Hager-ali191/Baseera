@@ -3,6 +3,9 @@ import os
 from nicegui import ui
 
 from config import HAGER_PHOTO_PATH
+from config import MAIRAMH_PHOTO_PATH
+from config import MAIRAMM_PHOTO_PATH
+from config import MENNA_PHOTO_PATH
 from feedback import feedback_section
 from guide_bot import init_guide_bot
 from layout import render_sticky_header
@@ -116,17 +119,17 @@ def home_page():
                  "Architected Speech-to-Text pipelines, NLP text understanding modules, and "
                  "implemented robust RESTful backend APIs for system integration.",
                  ["ASR / Speech", "FastAPI", "NLP"],
-                 "#", "mariamhazzaa@gmail.com", "MH", False),
+                 "https://www.linkedin.com/in/mariam-hazzaa-2ab364389?utm_source=share_via&utm_content=profile&utm_medium=member_ios", "mariamhazzaa@gmail.com", "MH", False),
                 ("Mariam Mohey", "Audio Processing & DevOps Engineer",
                  "Engineered Text-to-Speech audio response generation, managed Docker "
                  "containerization, and established multi-service environment workflows.",
                  ["TTS Audio", "Docker", "Containerization"],
-                 "#", "mariammohey@gmail.com", "MM", False),
+                 "https://www.linkedin.com/in/mariam-arafa0", "mariammohey@gmail.com", "MM", False),
                 ("Menna Sobhe", "System Orchestration & QA Lead",
                  "Supervised system orchestration, end-to-end integration testing, mobile "
                  "access configuration, and cloud service deployments.",
                  ["Orchestration", "Testing", "Cloud Deployment"],
-                 "#", "mennasobhe@gmail.com", "MS", False),
+                 "https://www.linkedin.com/in/menna-sobhe-03a2231ba", "mennasobhe@gmail.com", "MS", False),
             ]
             for name, role, desc, skills, linkedin, email, initials, has_photo in team_members:
                 with ui.card().classes(
