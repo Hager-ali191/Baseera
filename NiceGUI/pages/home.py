@@ -3,8 +3,8 @@ import os
 from nicegui import ui
 
 from config import HAGER_PHOTO_PATH
-from config import MAIRAMH_PHOTO_PATH
-from config import MAIRAMM_PHOTO_PATH
+from config import MARIAMH_PHOTO_PATH
+from config import MARIAMM_PHOTO_PATH
 from config import MENNA_PHOTO_PATH
 from feedback import feedback_section
 from guide_bot import init_guide_bot

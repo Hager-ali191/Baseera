@@ -7,7 +7,7 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 # Optional team photo shown on the Home page; falls back to initials if missing.
 HAGER_PHOTO_PATH = "C:\\Users\\RED  LINE\\Downloads\\NTI_Compter-Vision-Training\\Team Photos\\Hager Ali.jpg"
-MAIRAMH_PHOTO_PATH = "C:\\Users\\RED  LINE\\Downloads\\NTI_Compter-Vision-Training\\Team Photos\\Mariam Hazzaa.jfif"
+MARIAMH_PHOTO_PATH = "C:\\Users\\RED  LINE\\Downloads\\NTI_Compter-Vision-Training\\Team Photos\\Mariam Hazzaa.jfif"
 MARIAMM_PHOTO_PATH = "C:\\Users\\RED  LINE\\Downloads\\NTI_Compter-Vision-Training\\Team Photos\\Mariam Mohey.jpg"
 MENNA_PHOTO_PATH = "C:\\Users\\RED  LINE\\Downloads\\NTI_Compter-Vision-Training\\Team Photos\\Menna Sobhe.jfif"
 # Self-contained "image" for the robot avatar, built as an inline SVG data URI.
