@@ -3,18 +3,7 @@ from nicegui import ui
 
 def render_sticky_header(page: str = "home"):
     """
-    page: "home" | "about" | "demo" — controls two things:
-    1. What the "Home" nav button does (scroll to top vs navigate to "/").
-    2. Header visibility behavior:
-       - "home": fades in only after scrolling past the hero (the original,
-         intentional landing-page effect).
-       - anything else: **always visible**. Previously every page reused the
-         home page's scroll-triggered fade, so on shorter pages (About, Demo)
-         the user could scroll past the trigger threshold without the header
-         ever appearing — it just silently stayed invisible
-         (opacity: 0 / visibility: hidden / pointer-events: none) the whole
-         time. That's the bug being fixed here: non-home pages now get the
-         ".always-on" class, which force-overrides the fade CSS.
+    page: "home" | "about" | "demo" — controls header visibility.
     """
     is_home = page == "home"
 
@@ -169,3 +158,10 @@ def render_sticky_header(page: str = "home"):
                 icon="dark_mode",
                 on_click=lambda: ui.run_javascript('document.body.classList.toggle("dark-mode")'),
             ).props("flat round dense").classes("cursor-pointer header-btn")
+
+    # Initialize guide_bot once in layout
+    try:
+        from guide_bot import init_guide_bot
+        init_guide_bot()
+    except Exception:
+        pass

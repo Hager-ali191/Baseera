@@ -3,7 +3,7 @@
 Siara — the floating guide bot, present on every page (Home, About, Demo).
 
 Talks to POST /api/assistant on the backend (see backend/assistant.py),
-which uses Claude to answer questions about the Baseera project/website
+which uses Groq API to answer questions about the Baseera project/website
 (and gracefully falls back to rule-based answers if no API key is set).
 
 Also supports voice, entirely in the browser and in English:
@@ -11,16 +11,11 @@ Also supports voice, entirely in the browser and in English:
   what the person says straight into the chat box.
 - Speaker toggle: uses the Web Speech API (speechSynthesis) to read Siara's
   replies aloud.
-
-Neither of these touches the backend's Whisper/gTTS models — those are
-reserved for the main object-finding pipeline (POST /api/find).
 """
 
 import json
-
 import httpx
 from nicegui import ui
-
 from config import BACKEND_URL, ROBOT_AVATAR
 
 _SIARA_JS_INSTALLED = False
@@ -66,7 +61,7 @@ def _install_siara_js():
 async def _call_assistant(message: str, history: list) -> dict:
     """POST /api/assistant on the backend. Async (httpx), so it never blocks the UI."""
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{BACKEND_URL}/api/assistant",
                 json={"message": message, "history": history},
@@ -84,16 +79,20 @@ def init_guide_bot():
     conversation_history = []
     speak_replies = {"on": False}
 
-    with ui.row().classes("fixed bottom-6 left-6 z-50 items-end pointer-events-none"):
+    # Fixed container at bottom-left corner with proper layout stacking
+    with ui.page_sticky(position="bottom-left", x_offset=24, y_offset=24).classes("z-50 flex flex-col items-start gap-2"):
+        
+        # Chat Popup Card with vertical flex layout and explicit boundaries
         chat_card = ui.card().classes(
-            "w-96 h-[28rem] p-4 shadow-2xl rounded-2xl bg-white border border-yellow-200 "
-            "flex flex-col justify-between pointer-events-auto transition-all duration-300"
-        ).style("display: none;")
+            "w-80 shadow-2xl rounded-2xl bg-white border border-yellow-200 flex flex-col p-3 z-50 overflow-hidden"
+        ).style("height: 420px;")
+        chat_card.set_visibility(False)
 
         with chat_card:
-            with ui.row().classes("w-full items-center justify-between border-b pb-2 mb-2"):
+            # Header
+            with ui.row().classes("w-full items-center justify-between border-b pb-2 flex-shrink-0"):
                 with ui.row().classes("items-center gap-2"):
-                    ui.avatar(icon="smart_toy", color="yellow-500", text_color="white").classes("w-8 h-8 text-sm")
+                    ui.avatar(ROBOT_AVATAR, size="sm") if ROBOT_AVATAR else ui.avatar(icon="smart_toy", color="yellow-500", text_color="white").classes("w-8 h-8 text-sm")
                     ui.label("Siara (Guide Bot)").classes("font-bold text-gray-800 text-sm")
                 with ui.row().classes("items-center gap-0"):
                     speak_btn = ui.button(icon="volume_off", on_click=lambda: toggle_speak()) \
@@ -106,7 +105,8 @@ def init_guide_bot():
                 speak_replies["on"] = not speak_replies["on"]
                 speak_btn.props(f"icon={'volume_up' if speak_replies['on'] else 'volume_off'}")
 
-            chat_container = ui.scroll_area().classes("flex-grow w-full pr-2 space-y-2 text-sm")
+            # Scrollable Chat Container
+            chat_container = ui.scroll_area().classes("flex-grow w-full pr-2 my-2 text-sm")
             with chat_container:
                 ui.chat_message(
                     "Hi! I'm Siara. Ask me anything about how Baseera works, how to use "
@@ -115,53 +115,56 @@ def init_guide_bot():
                     avatar=ROBOT_AVATAR,
                 )
 
-            status_label = ui.label("").classes("text-xs text-slate-400 italic h-4")
+            status_label = ui.label("").classes("text-xs text-slate-400 italic h-4 flex-shrink-0")
 
-            with ui.row().classes("w-full items-center gap-1 pt-2 border-t"):
-                text_input = ui.input(placeholder="Ask Siara a question...").classes("flex-grow text-xs").props("dense outlined")
+            # Contained Bottom Input Section
+            with ui.column().classes("w-full gap-2 pt-2 border-t flex-shrink-0"):
+                with ui.row().classes("w-full items-center gap-1"):
+                    text_input = ui.input(placeholder="Ask Siara a question...").classes("flex-grow text-xs").props("dense outlined")
 
-                async def handle_send():
-                    query = text_input.value.strip()
-                    if not query:
-                        return
+                    async def handle_send():
+                        query = text_input.value.strip()
+                        if not query:
+                            return
 
-                    with chat_container:
-                        ui.chat_message(query, sent=True)
-                    text_input.value = ""
-                    chat_container.scroll_to(percent=1.0)
-                    status_label.set_text("Siara is thinking...")
+                        with chat_container:
+                            ui.chat_message(query, sent=True)
+                        text_input.value = ""
+                        chat_container.scroll_to(percent=1.0)
+                        status_label.set_text("Siara is thinking...")
 
-                    result = await _call_assistant(query, conversation_history[-8:])
-                    reply = result.get("reply", "Sorry, something went wrong.")
+                        result = await _call_assistant(query, conversation_history[-8:])
+                        reply = result.get("reply", "Sorry, something went wrong.")
 
-                    conversation_history.append({"role": "user", "content": query})
-                    conversation_history.append({"role": "assistant", "content": reply})
+                        conversation_history.append({"role": "user", "content": query})
+                        conversation_history.append({"role": "assistant", "content": reply})
 
-                    with chat_container:
-                        ui.chat_message(reply, sent=False, avatar=ROBOT_AVATAR)
-                    chat_container.scroll_to(percent=1.0)
-                    status_label.set_text("")
-
-                    if speak_replies["on"]:
-                        await ui.run_javascript(f"siaraSpeak({json.dumps(reply)})")
-
-                async def handle_mic():
-                    status_label.set_text("Listening...")
-                    try:
-                        transcript = await ui.run_javascript("return await siaraRecognizeSpeech()", timeout=15)
-                    except Exception as e:
+                        with chat_container:
+                            ui.chat_message(reply, sent=False, avatar=ROBOT_AVATAR)
+                        chat_container.scroll_to(percent=1.0)
                         status_label.set_text("")
-                        ui.notify(f"Voice input failed: {e}", type="negative")
-                        return
-                    status_label.set_text("")
-                    text_input.value = transcript
-                    await handle_send()
 
-                text_input.on("keydown.enter", handle_send)
-                ui.button(icon="mic", on_click=handle_mic).props("flat dense round").classes("text-yellow-600") \
-                    .tooltip("Ask by voice (English)")
-                ui.button(icon="send", on_click=handle_send).props("flat dense").classes("text-yellow-600")
+                        if speak_replies["on"]:
+                            await ui.run_javascript(f"siaraSpeak({json.dumps(reply)})")
 
+                    async def handle_mic():
+                        status_label.set_text("Listening...")
+                        try:
+                            transcript = await ui.run_javascript("return await siaraRecognizeSpeech()", timeout=15)
+                        except Exception as e:
+                            status_label.set_text("")
+                            ui.notify(f"Voice input failed: {e}", type="negative")
+                            return
+                        status_label.set_text("")
+                        text_input.value = transcript
+                        await handle_send()
+
+                    text_input.on("keydown.enter", handle_send)
+                    ui.button(icon="mic", on_click=handle_mic).props("flat dense round").classes("text-yellow-600") \
+                        .tooltip("Ask by voice (English)")
+                    ui.button(icon="send", on_click=handle_send).props("flat dense").classes("text-yellow-600")
+
+        # Floating Robot Icon Button
         ui.button(icon="smart_toy", on_click=lambda: chat_card.set_visibility(not chat_card.visible)) \
-            .classes("pointer-events-auto bg-yellow-400 hover:bg-yellow-500 text-gray-900 shadow-xl rounded-full w-14 h-14 flex items-center justify-center") \
+            .classes("bg-yellow-400 hover:bg-yellow-500 text-gray-900 shadow-xl rounded-full w-14 h-14 flex items-center justify-center") \
             .props("fab").tooltip("Ask Siara")
