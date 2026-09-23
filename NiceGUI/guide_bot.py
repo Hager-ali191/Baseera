@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Siara — the floating guide bot with interactive option chips/buttons.
+Siara — the floating guide bot with interactive, clickable option chips.
 """
 
 import json
@@ -80,15 +80,13 @@ def init_guide_bot():
         
         chat_card = ui.card().classes(
             "w-80 shadow-2xl rounded-2xl bg-white border border-yellow-200 p-3 z-50 flex flex-col justify-between"
-        ).style("height: 460px; max-height: 460px; overflow: hidden;")
+        ).style("height: 490px; max-height: 490px; overflow: hidden;")
         chat_card.set_visibility(False)
 
         with chat_card:
-            # Header
+            # Cleaned Header: Only "Siara" with mute & close controls
             with ui.row().classes("w-full items-center justify-between border-b pb-2 shrink-0"):
-                with ui.row().classes("items-center gap-2"):
-                    ui.avatar(ROBOT_AVATAR, size="sm") if ROBOT_AVATAR else ui.avatar(icon="smart_toy", color="yellow-500", text_color="white").classes("w-8 h-8 text-sm")
-                    ui.label("Siara (Guide Bot)").classes("font-bold text-gray-800 text-sm")
+                ui.label("Siara").classes("font-bold text-gray-800 text-lg ml-1")
                 with ui.row().classes("items-center gap-0"):
                     speak_btn = ui.button(icon="volume_off", on_click=lambda: toggle_speak()) \
                         .props("flat round dense size=sm").classes("text-gray-500") \
@@ -101,7 +99,7 @@ def init_guide_bot():
                 speak_btn.props(f"icon={'volume_up' if speak_replies['on'] else 'volume_off'}")
 
             # Chat Scroll Area
-            chat_container = ui.scroll_area().classes("w-full my-1 text-sm flex-1").style("max-height: 310px;")
+            chat_container = ui.scroll_area().classes("w-full my-1 text-sm flex-1").style("max-height: 340px;")
             
             status_label = ui.label("").classes("text-xs text-slate-400 italic shrink-0").style("min-height: 16px;")
 
@@ -123,7 +121,7 @@ def init_guide_bot():
                 with chat_container:
                     ui.chat_message(reply, sent=False, avatar=ROBOT_AVATAR)
                     
-                    # Render interactive question chips right below the new message
+                    # Render new option buttons after every response
                     render_option_chips()
 
                 chat_container.scroll_to(percent=1.0)
@@ -133,17 +131,20 @@ def init_guide_bot():
                     await ui.run_javascript(f"siaraSpeak({json.dumps(reply)})")
 
             def render_option_chips():
-                """Creates a clickable set of option chips inside the chat stream."""
-                with ui.column().classes("w-full gap-1 my-2 shrink-0"):
-                    ui.label("Or choose an option:").classes("text-xs text-gray-500 font-semibold")
-                    with ui.row().classes("w-full gap-1 flex-wrap"):
+                """Renders clear, responsive option buttons under messages."""
+                with ui.column().classes("w-full gap-1.5 my-2 shrink-0"):
+                    ui.label("Or choose an option:").classes("text-xs text-gray-600 font-bold")
+                    with ui.row().classes("w-full gap-1.5 flex-wrap"):
                         for q in SUGGESTED_QUESTIONS:
-                            ui.button(
+                            btn = ui.button(
                                 q, 
-                                on_click=lambda text=q: process_question(text)
-                            ).props("outline dense size=xs no-caps").classes("bg-yellow-50 text-yellow-900 border-yellow-300 rounded-full hover:bg-yellow-100")
+                                on_click=lambda text=q: ui.timer(0, lambda: process_question(text), once=True)
+                            )
+                            btn.props("outline dense size=sm no-caps").classes(
+                                "bg-yellow-50 text-yellow-950 border-yellow-400 rounded-lg hover:bg-yellow-200 px-3 py-1 font-semibold text-xs shadow-sm"
+                            )
 
-            # Initial Welcome Message & Initial Options
+            # Initial Welcome Message & Options
             with chat_container:
                 ui.chat_message(
                     "Hi! I'm Siara. Ask me anything about Baseera, or tap any option below to get instant answers:",
@@ -152,7 +153,7 @@ def init_guide_bot():
                 )
                 render_option_chips()
 
-            # Bottom Input Bar (optional typing / mic)
+            # Bottom Input Controls (Optional Typing & Mic)
             with ui.row().classes("w-full items-center gap-1 pt-2 border-t shrink-0 no-wrap").style("background: white;"):
                 text_input = ui.input(placeholder="Type or click an option above...") \
                     .classes("flex-1 text-xs").props("dense outlined")
