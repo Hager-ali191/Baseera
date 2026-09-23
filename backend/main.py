@@ -13,6 +13,14 @@ error while everything reloaded. Restart manually after editing code, or
 use `--reload --reload-exclude "*.pt"` if you really want it.
 """
 
+from dotenv import load_dotenv
+
+# Must run before `import pipeline` / `import assistant` below — both read
+# BASEERA_* environment variables at import time (model loading happens at
+# import time too), so .env has to be loaded first or those settings would
+# silently be ignored and only work if exported directly in the shell.
+load_dotenv()
+
 import base64
 import os
 import sqlite3

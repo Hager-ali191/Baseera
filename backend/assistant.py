@@ -5,156 +5,62 @@ This module powers the in-app assistant ("Siara") that can answer questions
 about the Baseera *project* and *website* itself (not the object-finding
 pipeline's user-facing queries — that's `pipeline.py`).
 
-Three modes, tried in order automatically:
+Siara uses the SAME local LLM `pipeline.py` already loads for the main
+object-finding pipeline (Qwen2.5-Instruct by default, or whatever
+BASEERA_LLM_MODEL is set to) — not a paid API. This means:
+  - No API key, no signup, no cost, no internet connection needed for Siara.
+  - No extra model loaded into memory — Siara reuses the one already
+    sitting there for object extraction / reply phrasing, so she adds
+    essentially zero extra RAM footprint on top of what's already running.
+  - Answer quality follows whatever BASEERA_LLM_MODEL is set to. The default
+    (Qwen2.5-0.5B-Instruct) is small and fast specifically to be gentle on
+    modest hardware; if you have RAM to spare, raising BASEERA_LLM_MODEL
+    (see backend/.env.example) improves both the main pipeline's answers
+    AND Siara's, at the same time, since they share the model.
 
-1. Groq (preferred, free) — if GROQ_API_KEY is set, every question is sent to
-   a fast Llama model on Groq's free API (no credit card required; see
-   https://console.groq.com/keys to get a key) along with a system prompt
-   describing the whole project. Called with the standard library only
-   (urllib), so it needs no extra package. This means Siara can answer *any*
-   phrasing of *any* question about the project, not just a fixed set of
-   keywords, and can help someone who says "I can't find X" by pointing at
-   the right page/button.
+Two modes, chosen automatically:
 
-2. Anthropic (optional, paid) — if ANTHROPIC_API_KEY is set instead (or
-   Groq's call fails), the same system prompt is sent to Claude via the
-   `anthropic` package. Kept for anyone who already has a key configured;
-   not required.
+1. LLM mode (default) — the question, a compact project-knowledge prompt,
+   and recent chat history are sent to the local model. This means Siara
+   can answer many different phrasings of a question about the project,
+   not just a fixed set of keywords.
 
-3. Fallback mode — if no key is configured, or every API call fails (e.g. no
-   internet), Siara falls back to the same rule-based keyword matching the
-   project shipped with originally, so the guide bot never goes completely
-   silent.
-
-Set a key as an environment variable before starting the backend:
-
-    export GROQ_API_KEY=gsk_...                   # macOS/Linux, free tier
-    setx GROQ_API_KEY "gsk_..."                    # Windows
-
-Optionally override the model with GROQ_MODEL (defaults to a small, fast
-model since this is a lightweight Q&A bot, not the main pipeline) or
-ANTHROPIC_MODEL for the Anthropic path.
+2. Fallback mode — used automatically if the LLM call fails for any reason,
+   or if BASEERA_SIARA_LLM=off is set (e.g. to keep Siara as cheap/instant
+   as possible on very constrained hardware, at the cost of only answering
+   a fixed set of keyword-matched questions). Rule-based, always available,
+   Siara never goes completely silent.
 """
 
-import json
 import os
-import urllib.request
 from typing import List, Optional, TypedDict
 
-DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
-DEFAULT_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+# Set BASEERA_SIARA_LLM=off to skip the local LLM entirely and always use
+# the instant rule-based fallback below — e.g. if even the small local
+# model is more CPU than you want Siara spending on a constrained machine.
+SIARA_LLM_ENABLED = os.getenv("BASEERA_SIARA_LLM", "on").strip().lower() not in ("off", "0", "false")
 
 # -----------------------------------------------------------------------------
-# Everything Siara needs to know about the project, in one place.
-# Keep this in sync with README.md — this IS the bot's "training data" for
-# LLM mode, and the ordering of the keyword checks below for fallback mode.
+# Kept deliberately short: this is fed to a small (by default ~0.5B
+# parameter) local model, not a frontier one. Long, nuanced system prompts
+# tend to get partially ignored by small models and just slow down every
+# reply (the whole prompt gets re-processed on every turn). Keep this in
+# sync with README.md at a high level, and with the keyword answers below.
 # -----------------------------------------------------------------------------
-PROJECT_KNOWLEDGE = """
-You are Siara, the friendly built-in guide for the Baseera project. You live
-as a small floating chat widget in the corner of the Baseera web app and your
-only job is to help the person using the app or reading about the project.
+PROJECT_KNOWLEDGE = """You are Siara, the short, friendly built-in guide for the Baseera project — a chat widget in the corner of the Baseera web app. Only answer questions about Baseera itself: what it is, how it works, or how to use this site. Keep answers to 1-3 short sentences.
 
-WHAT BASEERA IS
-Baseera ("insight" in Arabic) is an AI-powered voice-guided assistant built to
-help visually impaired users locate everyday objects around them. A user asks
-a question out loud or by typing (e.g. "where is my laptop?" or the Arabic
-equivalent), shows the app a photo of the room (camera or upload), and
-Baseera speaks back the object's approximate direction and distance.
+WHAT BASEERA IS: An assistive-tech app that helps visually impaired users find everyday objects. A user asks a question (voice or typed, English or Arabic) and shows a photo of the room; Baseera speaks back the object's direction and distance.
 
-ARCHITECTURE (two independent parts talking over HTTP)
-- Backend: a FastAPI server (`backend/`) that loads all AI models once at
-  startup and exposes a few endpoints:
-    * GET  /health        - liveness check, lists loaded detection models
-    * POST /api/find       - the core pipeline: takes a photo + (voice or
-                              typed question), returns text + spoken (mp3)
-                              answer
-    * POST /api/assistant  - this Q&A endpoint that powers Siara herself
-  Under the hood it chains together: Faster-Whisper (speech-to-text),
-  a local Qwen2.5-1.5B-Instruct LLM (to pull the target object out of the
-  question and to phrase the final spoken sentence), two YOLOv8 models
-  (object detection), a simple pinhole-camera distance estimate, and gTTS
-  (text-to-speech).
-- Frontend: there are two, either can be used against the same backend:
-    * NiceGUI app (`NiceGUI/app.py` + `NiceGUI/pages/`) — the primary, richer
-      web UI, split into one file per page: Home, About, and Live Demo.
-      Siara (you) lives here as a floating widget on every page.
-    * Streamlit app (`Streamlit/app.py`) — a simpler, single-page
-      alternative UI, handy for quick demos.
+HOW IT WORKS: Backend (FastAPI) transcribes voice with Whisper, detects language, uses a local LLM to find the target object name, runs two YOLOv8 models on the photo, computes direction/distance, and has the LLM phrase one spoken reply (gTTS). Endpoints: GET /health, POST /api/find (main pipeline), POST /api/assistant (that's you).
 
-HOW A REQUEST FLOWS THROUGH THE MAIN PIPELINE
-1. User records/uploads audio, or types a question, and provides a photo.
-2. The frontend posts both to POST /api/find on the backend.
-3. Backend transcribes audio with Whisper (skipped if the user typed instead),
-   detects the language (English/Arabic supported), extracts the target
-   object name with the LLM, runs both YOLO models on the photo, works out
-   direction (e.g. "top-left") and rough distance in meters for any matches,
-   and asks the LLM to phrase one short spoken sentence with the answer.
-4. Backend returns JSON with query_text, language, target_object, a list of
-   matches (each with object/direction/distance_m/confidence/model), and
-   reply_text, plus the spoken answer as a base64 mp3.
-5. The frontend displays the text and plays the audio.
+PAGES: "/" Home (architecture overview, team, feedback form). "/about" About (mission, who it's for, FAQ). "/demo" Live Demo — record voice (mic button, click to start/stop) or upload audio or type a question; capture a photo (live camera + Snap button, or upload); "SEE DASHBOARD RESULTS" button sends it all and shows the answer right there.
 
-NICEGUI PAGES AND WHERE THINGS ARE
-- "/" Home (`pages/home.py`) — hero section, a System Architecture &
-  Pipeline overview, the team, special thanks, and a project feedback form
-  at the bottom (posts to POST /api/feedback).
-- "/about" About (`pages/about.py`) — the project's mission, who it's for,
-  the feature list, and an FAQ. If someone asks "what is this project" or
-  "who is this for", point them here.
-- "/demo" Live Demo (`pages/demo.py`) — the interactive workspace:
-  Section 1 lets them record their voice question live with a real
-  microphone recorder (click once to start, again to stop) or upload an
-  audio file, or type the question instead. Section 2 lets them use a live
-  webcam preview + "Snap Camera Frame" button, or upload a photo file
-  instead. The big button at the bottom ("SEE DASHBOARD RESULTS") sends
-  everything to the backend and shows the transcribed question, the spoken
-  reply, direction, distance, and confidence right there on the same page.
-- You (Siara) float in the bottom-left corner on every page. You can answer
-  questions in text or the person can talk to you (their browser's speech
-  recognition fills in the chat box) and you can read your answers aloud
-  (browser text-to-speech).
+TROUBLESHOOTING: Backend not reachable = it's not running or still loading models (uvicorn main:app --port 8000, no --reload). Mic/camera not working = browser needs permission. Arabic answer showing in English = safety fallback, not a bug. Slow/hot machine = set BASEERA_CPU_THREADS lower.
 
-TROUBLESHOOTING PEOPLE OFTEN ASK ABOUT
-- "Backend not reachable" — the FastAPI server isn't running, or it's still
-  loading models. Start it with `uvicorn main:app --reload --port 8000` from
-  inside `backend/`, and wait for the console line "All models loaded".
-  First run also downloads model weights, so it's slow the first time.
-  Ensure BACKEND_URL (frontend env var) matches wherever it's actually
-  running, default is http://127.0.0.1:8000.
-- Mic recording doesn't seem to do anything — the browser needs microphone
-  permission; check the address bar for a blocked-permission icon. Recording
-  requires a secure context (localhost is fine; a plain http:// address on
-  another machine is not — use https or an SSH tunnel).
-- "Could not decode the uploaded image" — the uploaded file isn't a valid
-  image; re-upload or retake the photo.
-- Arabic response comes back in English — this is a deliberate safety net:
-  if the LLM's Arabic generation doesn't actually contain Arabic characters,
-  the backend falls back to a hand-written Arabic template instead of
-  returning broken/English text.
-- Distance numbers look off — FOCAL_LENGTH in backend/pipeline.py is a rough
-  constant that should be recalibrated for whatever camera is actually used
-  (measure a known object at a known distance and solve for focal length).
-- Running tests — `pytest backend/tests -v` from the project root (with the
-  backend's virtual environment active). The test suite stubs out the heavy
-  ML libraries so it runs in seconds without downloading any model weights.
-
-HOW TO ANSWER
-- Be concise and warm. This is a floating chat widget, not a document —
-  answer in a few sentences, not an essay, unless the person clearly wants
-  detail.
-- Only answer questions about the Baseera project, this website/app, how to
-  use it, its architecture, setup, or troubleshooting. If asked something
-  totally unrelated (weather, unrelated coding help, etc.), gently say
-  that's outside what you can help with here and steer back to Baseera.
-- If someone says they can't find a feature, tell them exactly which page
-  and section it's on, using the page names above.
-- Never invent API endpoints, files, or behavior that isn't described above.
-  If you don't know, say so plainly and suggest checking the README.
-- Keep to English, since that's the language of this assistant.
-""".strip()
+If asked something unrelated to Baseera, say that's outside what you help with here. Never invent features that aren't listed above."""
 
 FALLBACK_KNOWLEDGE_BASE = {
-    "tools": "Baseera is built using FastAPI for the backend, NiceGUI (and a Streamlit alternative) for the web interface, YOLOv8 for object detection, Faster-Whisper for speech-to-text, a local Qwen2.5-1.5B-Instruct LLM for language understanding, and gTTS for the spoken replies.",
+    "tools": "Baseera is built using FastAPI for the backend, NiceGUI (and a Streamlit alternative) for the web interface, YOLOv8 for object detection, Faster-Whisper for speech-to-text, a small local instruct LLM (Qwen2.5, size configurable via BASEERA_LLM_MODEL) for language understanding, and gTTS for the spoken replies.",
     "yolo": "Baseera runs two YOLOv8 models (yolov8n and yolov8s) via backend/pipeline.py to detect everyday objects and estimate their direction and distance from a single photo.",
     "audio": "Voice input is transcribed with Faster-Whisper, and replies are spoken back using gTTS. On the Input page, you can either record your voice live or upload an audio file.",
     "api": "The FastAPI backend runs on port 8000 by default, exposing GET /health, POST /api/find (the main pipeline), and POST /api/assistant (that's me!).",
@@ -184,9 +90,7 @@ def _fallback_reply(user_query: str) -> str:
     return (
         "Hi! I'm Siara. I can help you explore how Baseera works — try asking "
         "about the tech stack, the API, voice recording, YOLO detection, "
-        "testing, or which page has what you're looking for. "
-        "(I'm currently running in offline mode — set ANTHROPIC_API_KEY on "
-        "the backend for full conversational answers.)"
+        "testing, or which page has what you're looking for."
     )
 
 
@@ -195,81 +99,40 @@ class ChatTurn(TypedDict):
     content: str
 
 
-def _groq_reply(message: str, history: List[ChatTurn]) -> Optional[str]:
-    """Calls Groq's free, OpenAI-compatible chat endpoint using only the
-    standard library (no `groq` or `openai` package needed). Returns None
-    on any failure so the caller can fall through to the next option."""
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        return None
-
-    messages = [{"role": "system", "content": PROJECT_KNOWLEDGE}]
-    messages += [{"role": t["role"], "content": t["content"]} for t in history]
-    messages.append({"role": "user", "content": message})
-
-    body = json.dumps(
-        {"model": DEFAULT_GROQ_MODEL, "messages": messages, "max_tokens": 400}
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        text = data["choices"][0]["message"]["content"].strip()
-        return text or None
-    except Exception:
-        # Bad/missing key, rate limit, no internet, model renamed, etc.
-        # Any of these should fall through, not crash the widget.
-        return None
-
-
-def _anthropic_reply(message: str, history: List[ChatTurn]) -> Optional[str]:
-    """Calls Claude via the `anthropic` package, if ANTHROPIC_API_KEY is set."""
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return None
-
-    try:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=api_key)
-        messages = [{"role": t["role"], "content": t["content"]} for t in history]
-        messages.append({"role": "user", "content": message})
-
-        response = client.messages.create(
-            model=DEFAULT_MODEL,
-            max_tokens=400,
-            system=PROJECT_KNOWLEDGE,
-            messages=messages,
-        )
-        text = "".join(
-            block.text for block in response.content if getattr(block, "type", None) == "text"
-        ).strip()
-        return text or None
-    except Exception:
-        return None
-
-
 def get_assistant_reply(message: str, history: Optional[List[ChatTurn]] = None) -> dict:
     """
     Returns {"reply": str, "source": "llm" | "fallback"}.
 
-    Tries Groq's free API first (if GROQ_API_KEY is set), then Anthropic (if
-    ANTHROPIC_API_KEY is set instead), then falls back to rule-based answers
-    on any failure so the widget always responds to something.
+    Tries the local LLM first (unless disabled via BASEERA_SIARA_LLM=off);
+    falls back to rule-based answers on any failure so the widget always
+    responds to something.
     """
     history = history or []
 
-    for call in (_groq_reply, _anthropic_reply):
-        text = call(message, history)
-        if text:
-            return {"reply": text, "source": "llm"}
+    if SIARA_LLM_ENABLED:
+        try:
+            import pipeline  # the already-loaded local LLM — see module docstring
+
+            # Keep only the last couple of turns: this model re-processes the
+            # whole prompt on every call (no persistent conversation state),
+            # so a shorter prompt means a faster reply on CPU.
+            messages = [{"role": "system", "content": PROJECT_KNOWLEDGE}]
+            for turn in history[-4:]:
+                messages.append({"role": turn["role"], "content": turn["content"]})
+            messages.append({"role": "user", "content": message})
+
+            outputs = pipeline.llm_pipeline(
+                messages,
+                max_new_tokens=200,
+                do_sample=True,
+                temperature=0.6,
+            )
+            reply = outputs[0]["generated_text"][-1]["content"].strip()
+            if reply:
+                return {"reply": reply, "source": "llm"}
+        except Exception:
+            # Any failure (model not ready yet, out of memory, unexpected
+            # output shape...) falls straight through to the fallback below.
+            pass
 
     return {"reply": _fallback_reply(message), "source": "fallback"}
