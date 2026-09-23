@@ -1,16 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Siara — the floating guide bot, present on every page (Home, About, Demo).
-
-Talks to POST /api/assistant on the backend (see backend/assistant.py),
-which uses Groq API to answer questions about the Baseera project/website
-(and gracefully falls back to rule-based answers if no API key is set).
-
-Also supports voice, entirely in the browser and in English:
-- Mic button: uses the Web Speech API (SpeechRecognition) to transcribe
-  what the person says straight into the chat box.
-- Speaker toggle: uses the Web Speech API (speechSynthesis) to read Siara's
-  replies aloud.
 """
 
 import json
@@ -22,7 +12,6 @@ _SIARA_JS_INSTALLED = False
 
 
 def _install_siara_js():
-    """Adds the browser-side speech recognition / synthesis helpers, once per page load."""
     global _SIARA_JS_INSTALLED
     if _SIARA_JS_INSTALLED:
         return
@@ -59,7 +48,6 @@ def _install_siara_js():
 
 
 async def _call_assistant(message: str, history: list) -> dict:
-    """POST /api/assistant on the backend. Async (httpx), so it never blocks the UI."""
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
@@ -73,19 +61,18 @@ async def _call_assistant(message: str, history: list) -> dict:
 
 
 def init_guide_bot():
-    """Initializes Siara, a persistent floating guide bot on the bottom-left of the screen."""
     _install_siara_js()
 
     conversation_history = []
     speak_replies = {"on": False}
 
-    # Fixed container at bottom-left corner with proper layout stacking
+    # Floating container pinned at bottom-left
     with ui.page_sticky(position="bottom-left", x_offset=24, y_offset=24).classes("z-50 flex flex-col items-start gap-2"):
         
-        # Chat Popup Card with vertical flex layout and explicit boundaries
+        # Chat Card with strict height and flex-col layout
         chat_card = ui.card().classes(
-            "w-80 shadow-2xl rounded-2xl bg-white border border-yellow-200 flex flex-col p-3 z-50 overflow-hidden"
-        ).style("height: 420px;")
+            "w-80 shadow-2xl rounded-2xl bg-white border border-yellow-200 flex flex-col justify-between p-3 z-50 overflow-hidden"
+        ).style("height: 440px;")
         chat_card.set_visibility(False)
 
         with chat_card:
@@ -105,8 +92,8 @@ def init_guide_bot():
                 speak_replies["on"] = not speak_replies["on"]
                 speak_btn.props(f"icon={'volume_up' if speak_replies['on'] else 'volume_off'}")
 
-            # Scrollable Chat Container
-            chat_container = ui.scroll_area().classes("flex-grow w-full pr-2 my-2 text-sm")
+            # Fixed scroll area height so it leaves space for the input row
+            chat_container = ui.scroll_area().classes("w-full pr-2 text-sm").style("height: 280px;")
             with chat_container:
                 ui.chat_message(
                     "Hi! I'm Siara. Ask me anything about how Baseera works, how to use "
@@ -117,10 +104,11 @@ def init_guide_bot():
 
             status_label = ui.label("").classes("text-xs text-slate-400 italic h-4 flex-shrink-0")
 
-            # Contained Bottom Input Section
-            with ui.column().classes("w-full gap-2 pt-2 border-t flex-shrink-0"):
-                with ui.row().classes("w-full items-center gap-1"):
-                    text_input = ui.input(placeholder="Ask Siara a question...").classes("flex-grow text-xs").props("dense outlined")
+            # Input Controls Area at Bottom
+            with ui.column().classes("w-full gap-1 pt-2 border-t flex-shrink-0"):
+                with ui.row().classes("w-full items-center gap-1 no-wrap"):
+                    text_input = ui.input(placeholder="Ask Siara a question...") \
+                        .classes("flex-grow text-xs").props("dense outlined")
 
                     async def handle_send():
                         query = text_input.value.strip()
@@ -162,9 +150,9 @@ def init_guide_bot():
                     text_input.on("keydown.enter", handle_send)
                     ui.button(icon="mic", on_click=handle_mic).props("flat dense round").classes("text-yellow-600") \
                         .tooltip("Ask by voice (English)")
-                    ui.button(icon="send", on_click=handle_send).props("flat dense").classes("text-yellow-600")
+                    ui.button(icon="send", on_click=handle_send).props("flat dense round").classes("text-yellow-600")
 
-        # Floating Robot Icon Button
+        # Floating launcher button
         ui.button(icon="smart_toy", on_click=lambda: chat_card.set_visibility(not chat_card.visible)) \
             .classes("bg-yellow-400 hover:bg-yellow-500 text-gray-900 shadow-xl rounded-full w-14 h-14 flex items-center justify-center") \
             .props("fab").tooltip("Ask Siara")
