@@ -12,22 +12,23 @@
 
 ## Table of Contents
 
-- [1. What Baseera Is](#1-what-baseera-is)
-- [2. How It Works, In Plain Terms](#2-how-it-works-in-plain-terms)
-- [3. Project Structure](#3-project-structure)
-- [4. The Backend](#4-the-backend)
-- [5. The Frontend](#5-the-frontend)
-- [6. Siara, the Guide Bot](#6-siara-the-guide-bot)
-- [7. One-Time Setup](#7-one-time-setup)
-- [8. Running the Project](#8-running-the-project)
-- [9. Running with Docker](#9-running-with-docker)
-- [10. Testing](#10-testing)
-- [11. Troubleshooting](#11-troubleshooting)
-- [12. Notes for Contributors](#12-notes-for-contributors)
+- [1. What Baseera Is](#what-baseera-is)
+- [2. How It Works, In Plain Terms](#how-it-works-in-plain-terms)
+- [3. Project Structure](#project-structure)
+- [4. The Backend](#the-backend)
+- [5. The Frontend](#the-frontend)
+- [6. Siara, the Guide Bot](#siara-the-guide-bot)
+- [7. One-Time Setup](#one-time-setup)
+- [8. Running the Project](#running-the-project)
+- [9. Running with Docker](#running-with-docker)
+- [10. Testing](#testing)
+- [11. Troubleshooting](#troubleshooting)
+- [12. Notes for Contributors](#notes-for-contributors)
+- [13. Meet The Team](#meet-the-team)
 
 ---
 
-## 1. What Baseera Is
+## What Baseera Is
 
 Baseera is an **assistive-technology project**: an AI-powered voice-guided
 assistant that helps **visually impaired users locate everyday objects**
@@ -74,7 +75,7 @@ If you want the engineering detail behind each of those steps, see
 [§4 The Backend](#4-the-backend) below — this section is deliberately kept
 non-technical for anyone evaluating the *project*, not the code.
 
-## 3. Project Structure
+## Project Structure
 
 ```
 Baseera/
@@ -136,7 +137,7 @@ The backend is completely frontend-agnostic: either frontend (or your own)
 talks to it over plain HTTP, so you can run just one frontend, both, or swap
 in something else entirely without touching the backend.
 
-## 4. The Backend
+## The Backend
 
 **Stack:** FastAPI · Faster-Whisper (speech-to-text) · two YOLOv8 models
 (object detection) · a local Qwen2.5-1.5B-Instruct LLM (language
@@ -193,7 +194,7 @@ history uses it to draw the box on the photo.
 
 Response: `{ "reply": "...", "source": "llm" | "fallback" }`. See §6.
 
-## 5. The Frontend
+## The Frontend
 
 There are **two** frontends, either one works against the same backend —
 pick whichever fits your demo/deployment:
@@ -254,7 +255,7 @@ Both frontends read the backend URL from the `BACKEND_URL` environment
 variable (defaults to `http://127.0.0.1:8000`), so pointing either one at a
 backend running elsewhere is a one-line change, not a code edit.
 
-## 6. Siara, the Guide Bot
+## Siara, the Guide Bot
 
 Siara is the floating assistant in the corner of the NiceGUI app. She's
 **separate from the main object-finding pipeline** — her job is to answer
@@ -287,7 +288,7 @@ To turn on full LLM mode: get a key at
 in `backend/.env` if you're using a tool that loads it, e.g. `python-dotenv`
 or your shell's own `.env` support).
 
-## 7. One-Time Setup
+## One-Time Setup
 
 Two ways to get running: natively (this section) or with Docker (skip
 straight to §9, no local Python setup needed there).
@@ -317,7 +318,7 @@ straight to §9, no local Python setup needed there).
    `backend/.env` and fill in your `ANTHROPIC_API_KEY`, or export it
    directly in your shell.
 
-## 8. Running the Project
+## Running the Project
 
 You need **two terminals** (backend + one frontend), both with `venv` active.
 
@@ -344,7 +345,7 @@ streamlit run Streamlit/app.py
 
 Or the matching `run_frontend_nicegui.*` / `run_frontend_streamlit.*` script.
 
-## 9. Running with Docker
+## Running with Docker
 
 The whole project (backend + NiceGUI frontend) can run with a single
 command, no local Python setup needed — everything else in this README
@@ -401,7 +402,7 @@ docker compose down                  # stop and remove containers
 docker compose down -v               # also remove the model-cache volume
 ```
 
-## 10. Testing
+## Testing
 
 A pytest suite under `backend/tests/` covers both the pipeline's core logic
 and the API endpoints — including Siara's `/api/assistant` in both LLM and
@@ -436,7 +437,7 @@ real webcam capture, microphone recording, and speech recognition/synthesis
 are browser JavaScript and need to be checked by hand in an actual browser
 (see §11 for what to check).
 
-## 11. Troubleshooting
+## Troubleshooting
 
 | Symptom | Likely cause / fix |
 |---|---|
@@ -458,7 +459,7 @@ are browser JavaScript and need to be checked by hand in an actual browser
 | Run history is empty after reloading the page | By design — history is kept in the browser tab's memory only, so photos and audio are never stored (see §1). |
 | Header (logo/nav) never appears on the About or Live Demo pages | Fixed — the header used to fade in only after scrolling past a threshold tuned for the long Home page (`window.innerHeight * 0.45`), so shorter pages could be scrolled through entirely without ever crossing it. `NiceGUI/layout.py` now renders the header as always-visible on every page except Home, which keeps the original fade-in effect since it actually makes sense there. |
 
-## 12. Notes for Contributors
+## Notes for Contributors
 
 - **Models load once**, at backend startup — keep the backend terminal
   running while developing the frontend.
@@ -490,3 +491,17 @@ are browser JavaScript and need to be checked by hand in an actual browser
   --build` rebuilds only the images whose `Dockerfile`/context changed.
   Model weights persist across rebuilds via the `model-cache` volume, so a
   rebuild doesn't mean re-downloading them.
+
+
+---
+
+## Meet the Team
+
+| Team Member | AI Focus Area | Deployment Focus Area | Contact |
+| :--- | :--- | :--- | :--- |
+| **Hager Ali** | Vision & Detection | Frontend (Streamlit & NiceGUI) | [![GitHub](https://img.shields.io/badge/GitHub-100000?style=flat&logo=github&logoColor=white)](https://github.com/Hager-ali191) [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/hager-ali-mohammed) |
+| **Mariam Hazzaa** | Speech & Language | Backend API | [![GitHub](https://img.shields.io/badge/GitHub-100000?style=flat&logo=github&logoColor=white)](https://github.com/mariamhazzaa) [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/mariam-hazzaa-2ab364389?utm_source=share_via&utm_content=profile&utm_medium=member_ios) |
+| **Mariam Mohey** | Response & Voice | Containerization | [![GitHub](https://img.shields.io/badge/GitHub-100000?style=flat&logo=github&logoColor=white)](https://github.com/MariamArafa-0) [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/mariam-arafa0) |
+| **Menna Sobhe** | Orchestration & Testing | Cloud & Mobile Access | [![GitHub](https://img.shields.io/badge/GitHub-100000?style=flat&logo=github&logoColor=white)](https://github.com/monyy77) [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/menna-sobhe-03a2231ba) |
+
+---
